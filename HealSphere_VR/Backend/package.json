@@ -1,0 +1,14 @@
+{
+  "name": "healsphere-tripo-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": { "start": "node src/server.js", "test": "node --test" },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "gltf-validator": "^2.0.0-dev.3.10",
+    "image-size": "^2.0.2"
+  }
+}

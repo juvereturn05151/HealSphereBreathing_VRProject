@@ -1,0 +1,7 @@
+# Backend secrets and generated/private local state
+Backend/.env
+Backend/.env.*
+!Backend/.env.example
+Backend/node_modules/
+Backend/data/
+Backend/*.log
