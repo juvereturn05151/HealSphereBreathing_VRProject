@@ -1,0 +1,25 @@
+SUCCESS
+Scene: Assets/HealSphere/Meadow/BakedMeadow/BreathingMeadow.unity
+Seed: 23819
+XR Origin count: 1
+Original rig: XR Origin Hands (XR Rig)
+Missing scripts: 0
+Gameplay anchors: 5 unique; creation distances within 1.5-2.5 m
+Terrain rotation: identity
+
+Active mesh renderers (includes both tree LODs): 260
+Mesh triangles (both LODs, excludes Terrain/XR skinned meshes): 93016
+Disabled existing locomotion providers in copy: SnapTurnProvider, ContinuousTurnProvider, DynamicMoveProvider, GrabMoveProvider, GrabMoveProvider, TwoHandedGrabMoveProvider, TeleportationProvider, ClimbProvider, GravityProvider, JumpProvider
+Headset stereo, APK build and 72 FPS require Quest 2 validation.
+
+Editor verification:
+- Unity 6000.4.6f1 compiled the added runtime/editor scripts without C# errors.
+- Custom shader compiled for the current desktop renderer without shader errors.
+- Inspected seated, standing, left, rear and right desktop renders: meadow ground and distant hills cover the horizon; no template room geometry appears in the isolated environment previews.
+- AudioSource references are assigned; the three optional AudioClip references are empty.
+- Original SampleScene, BasicScene, source XR prefab, manifest, OpenXR settings, GraphicsSettings and EditorBuildSettings matched their protected SHA-256 snapshots after generation.
+- New serialized configurable fields are private. No Canvas, Button, TMP element or other UI construction code was added.
+
+Not validated: Android APK build, Quest 2 tracking/hand-controller behavior, device stereo rendering, GPU/CPU frame timing, thermal stability and 72 FPS. Ambient recordings still need to be assigned.
+
+The original scene remains open in the Editor; open the generated BreathingMeadow scene alone for testing. Build Profiles still targets the original scene until the developer explicitly selects the meadow.

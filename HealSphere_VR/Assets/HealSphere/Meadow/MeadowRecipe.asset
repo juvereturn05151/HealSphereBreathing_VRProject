@@ -1,0 +1,24 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 40dba618d4fba604390170e61f2b46fb, type: 3}
+  m_Name: MeadowRecipe
+  m_EditorClassIdentifier: Assembly-CSharp-Editor::HealSphere.Meadow.Editor.MeadowRecipe
+  sourceScene: {fileID: 102900000, guid: 55daccc09a3b69647bbab145b54a3ab3, type: 3}
+  seed: 23819
+  terrainWidth: 768
+  hillHeight: 16
+  tuftsPerTile: 75
+  flowerCount: 1200
+  treeCount: 22
+  meadowGreen: {r: 0.44, g: 0.65, b: 0.27, a: 1}
+  skyBlue: {r: 0.54, g: 0.76, b: 0.89, a: 1}
+  cloudWhite: {r: 0.99, g: 0.985, b: 0.94, a: 1}
