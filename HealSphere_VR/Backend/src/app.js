@@ -1,8 +1,11 @@
 import express from 'express';
-import { timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual, createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { MAX_BYTES, validateGlb } from './glb.js';
+import { mountCreations } from './creations.js';
+import { openLibrary } from './library.js';
+import { generationSettings } from './limits.js';
 
 export const CAT_PROMPT = 'Cute very chubby orange tabby cat, rounded body, short legs, fluffy cheeks, tiny paws, closed smiling eyes, cream belly, soft pastel colors, stylized 3D game asset, friendly and relaxing, suitable for a cozy VR wellness experience.';
 const API = 'https://openapi.tripo3d.ai/v3';
@@ -11,11 +14,17 @@ class SafeError extends Error {
   constructor(code, status = 502) { super(code); this.status = status; }
 }
 
-export async function createApp({ key, token, enabled = false, dataDir, hosts = ['tripo3d.ai'],
-  fetchFn = fetch, pollMs = 2500, taskTimeoutMs = 600000, requestTimeoutMs = 30000 }) {
+export async function createApp({ key, token, enabled = false, dataDir, hosts = ['tripo3d.ai', 'openapi-dl.data.tripo3d.com'],
+  fetchFn = fetch, pollMs = 2500, taskTimeoutMs = 600000, requestTimeoutMs = 30000,
+  openaiKey, openaiModel = 'gpt-4.1-mini', offlineConversation = true, reviewMode = 'openai', demoModelPath, demoDelayMs = 2500, generationLimits = {} }) {
   if (!token || token.length < 32 || token === key || token.startsWith('replace_'))
     throw new Error('Configure a distinct BACKEND_ACCESS_TOKEN of at least 32 characters.');
+  if (!['openai', 'manual', 'none'].includes(reviewMode)) throw new Error('INVALID_MODEL_REVIEW_MODE');
   await mkdir(dataDir, { recursive: true });
+  const limits = generationSettings(generationLimits);
+  if (!Number.isSafeInteger(taskTimeoutMs) || taskTimeoutMs < 1 || taskTimeoutMs > 3600000) throw new Error('INVALID_GENERATION_TIMEOUT');
+  const owner = createHash('sha256').update(token).digest('hex');
+  const library = await openLibrary({ dataDir, ...limits, allowUnreviewed: reviewMode === 'none' });
   const journal = path.join(dataDir, 'test-cat.json');
   const modelPath = path.join(dataDir, 'test-cat.glb');
   let job = null;
@@ -38,13 +47,13 @@ export async function createApp({ key, token, enabled = false, dataDir, hosts = 
     }
     return Buffer.concat(chunks);
   }
-  async function api(route, body) {
+  async function api(route, body, signal) {
     if (!key || key.startsWith('replace_')) throw new SafeError('TRIPO_KEY_NOT_CONFIGURED', 503);
     try {
       const response = await fetchFn(API + route, {
         method: body ? 'POST' : 'GET', redirect: 'error',
         headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-        ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(requestTimeoutMs)
+        ...(body ? { body: JSON.stringify(body) } : {}), signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(requestTimeoutMs)]) : AbortSignal.timeout(requestTimeoutMs)
       });
       const data = JSON.parse((await limitedBody(response, 256 * 1024)).toString('utf8'));
       if (response.status === 401 || [2, 1002].includes(data.code)) throw new SafeError('TRIPO_AUTH_FAILED', 502);
@@ -62,16 +71,25 @@ export async function createApp({ key, token, enabled = false, dataDir, hosts = 
     if (!Number.isFinite(data.balance) || !Number.isFinite(data.frozen)) throw new SafeError('INVALID_BALANCE');
     return { balance: data.balance, frozen: data.frozen };
   }
-  async function download(url) {
+  function validateUrl(url) {
     const u = new URL(url);
     if (u.protocol !== 'https:' || u.username || u.password || (u.port && u.port !== '443') ||
         !hosts.some(h => u.hostname === h || u.hostname.endsWith('.' + h))) throw new SafeError('MODEL_HOST_REJECTED');
+    return u;
+  }
+  async function downloadBytes(url, signal) {
+    const u = validateUrl(url);
     // No Tripo Authorization header is forwarded to the CDN; redirects are forbidden.
-    const response = await fetchFn(u, { redirect: 'error', signal: AbortSignal.timeout(requestTimeoutMs) });
+    const response = await fetchFn(u, { redirect: 'error', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(requestTimeoutMs)]) : AbortSignal.timeout(requestTimeoutMs) });
     if (!response.ok) throw new SafeError('MODEL_DOWNLOAD_FAILED');
-    const bytes = await limitedBody(response, MAX_BYTES);
+    const bytes = await limitedBody(response, limits.maxModelBytes);
     let metadata;
     try { metadata = await validateGlb(bytes); } catch { throw new SafeError('MODEL_REJECTED'); }
+    return { bytes, metadata };
+  }
+  downloadBytes.validateUrl = validateUrl;
+  async function download(url) {
+    const { bytes, metadata } = await downloadBytes(url);
     await writeFile(modelPath + '.tmp', bytes);
     await rename(modelPath + '.tmp', modelPath);
     return metadata;
@@ -86,7 +104,9 @@ export async function createApp({ key, token, enabled = false, dataDir, hosts = 
           if (task.status === 'success') {
             job.status = 'downloading'; await save();
             job.metadata = await download(task.output?.model_url);
-            job.status = 'awaiting_review'; job.progress = 100; job.error = null; await save(); return;
+            job.status = reviewMode === 'none' ? 'ready' : 'awaiting_review';
+            job.review = reviewMode === 'none' ? 'skipped_by_owner' : 'operator_review_required';
+            job.progress = 100; job.error = null; await save(); return;
           }
           if (!['queued', 'running', 'processing', 'pending'].includes(task.status)) throw new SafeError('INVALID_TASK_STATUS');
           job.status = 'polling';
@@ -121,6 +141,13 @@ export async function createApp({ key, token, enabled = false, dataDir, hosts = 
     next();
   });
   app.use(express.json({ limit: '2kb' }));
+  const rateWindow = new Map();
+  app.use('/api', (req, res, next) => {
+    const now = Date.now(); let rate = rateWindow.get(owner);
+    if (!rate || now - rate.start >= 60000) { rate = { start: now, count: 0 }; rateWindow.set(owner, rate); }
+    if (++rate.count > limits.requestsPerMinute) return res.status(429).json({ error: 'REQUEST_RATE_LIMIT' });
+    next();
+  });
   app.get('/health', (req, res) => res.json({ status: 'ok' }));
   app.get('/api/balance', async (req, res) => res.json(await balance()));
   app.post('/api/test-cat', async (req, res) => {
@@ -131,6 +158,10 @@ export async function createApp({ key, token, enabled = false, dataDir, hosts = 
     submitting = true;
     try {
       if ((await balance()).balance <= 0) throw new SafeError('INSUFFICIENT_CREDITS', 402);
+      if (limits.authorizedPrompt && limits.authorizedPrompt !== CAT_PROMPT) throw new SafeError('PROMPT_NOT_AUTHORIZED', 403);
+      if (!limits.allowedProviders.includes('tripo')) throw new SafeError('PROVIDER_DISABLED', 403);
+      try { library.reserve({ key: 'legacy-test-cat', owner, sessionId: 'legacy-test-cat', requestKey: 'legacy-test-cat', jobId: 'legacy-test-cat', perSession: limits.perSession, lifetime: limits.maxLifetime }); }
+      catch (e) { throw new SafeError(['SESSION_GENERATION_LIMIT','GENERATION_BUDGET_EXHAUSTED'].includes(e.message) ? e.message : 'STORAGE_FAILED', 409); }
       // Persist BEFORE the paid POST. Ambiguous responses never get automatically retried.
       job = { status: 'submission_unknown', task_id: null, progress: 0, error: null, deadline: Date.now() + taskTimeoutMs };
       await save();
@@ -159,10 +190,12 @@ export async function createApp({ key, token, enabled = false, dataDir, hosts = 
     try { await validateGlb(bytes); } catch { throw new SafeError('MODEL_REJECTED'); }
     res.type('model/gltf-binary').send(bytes);
   });
+  const creations = await mountCreations(app, { api, balance, downloadBytes, limitedBody, SafeError, dataDir, enabled, fetchFn,
+    pollMs, taskTimeoutMs, openaiKey, openaiModel, offlineConversation, reviewMode, demoModelPath, demoDelayMs, library, limits, owner });
   app.use((req, res) => res.status(404).json({ error: 'NOT_FOUND' }));
   app.use((err, req, res, next) => {
     if (res.headersSent) return next(err);
     res.status(err instanceof SafeError ? err.status : 500).json({ error: err instanceof SafeError ? err.message : 'INTERNAL_OR_INVALID_REQUEST' });
   });
-  return { app, waitForWorker: () => worker };
+  return { app, library, conversation: creations.conversation, waitForWorker: async () => { await worker; await creations.wait(); }, close: () => library.close() };
 }

@@ -8,7 +8,7 @@ using UnityEngine.Networking;
 namespace HealSphere.Tripo
 {
     /// <summary>Explicit, single-cat test client. No network requests are made on Play Mode entry.</summary>
-    public sealed class TripoModelLoader : MonoBehaviour
+    public sealed partial class TripoModelLoader : MonoBehaviour
     {
         [Header("Backend (Never Enter The Tripo API Key)")]
         [SerializeField] private string backendUrl = "http://127.0.0.1:3000";
@@ -41,6 +41,11 @@ namespace HealSphere.Tripo
         private GltfImport currentImport;
         private string currentTaskId;
         private const int MaxModelBytes = 32 * 1024 * 1024;
+        [Serializable] private sealed class BackendError
+        {
+            [SerializeField] private string error;
+            public string Code => error;
+        }
 
         // Private DTO fields are populated through JsonUtility; no mutable public data API.
         [Serializable]
@@ -196,7 +201,19 @@ namespace HealSphere.Tripo
                 }
                 ct.ThrowIfCancellationRequested();
                 if (request.result != UnityWebRequest.Result.Success)
+                {
+                    if (route.StartsWith("/api/", StringComparison.Ordinal) && request.downloadHandler.data?.Length < 65536)
+                    {
+                        try
+                        {
+                            var error = JsonUtility.FromJson<BackendError>(request.downloadHandler.text);
+                            if (error != null && System.Text.RegularExpressions.Regex.IsMatch(error.Code ?? "", "^[A-Z][A-Z0-9_]{1,79}$"))
+                                throw new InvalidOperationException("Backend: " + error.Code);
+                        }
+                        catch (ArgumentException) { }
+                    }
                     throw new InvalidOperationException("Backend request failed (HTTP " + request.responseCode + "). Check connection, local access token, backend state, and README. No automatic paid retry.");
+                }
                 var bytes = request.downloadHandler.data;
                 if (bytes == null || bytes.Length > limit) throw new InvalidOperationException("Invalid backend response size.");
                 return bytes;

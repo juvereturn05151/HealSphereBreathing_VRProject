@@ -1,10 +1,26 @@
-# Tripo cat integration — Breathe Into Being
+# HealSphere creation backend
 
-This is an explicit, single-cat development test for Unity 6000.4.6f1, URP 17.4 and Quest 2. It adds no breathing, particles, UI, locomotion, camera changes, or automatic paid calls. The existing XR assets, scenes, input actions and project settings are preserved. Scene hookup and headset verification are pending manual work.
+**Latest owner-requested review setting:** `MODEL_REVIEW_MODE=none`. Newly downloaded models become ready immediately after GLB validation and library persistence, without image review or manual approval. Metadata explicitly records `skipped_by_owner`; no visual approval is claimed. Existing waiting models are revalidated and released on restart; failed, cancelled and rejected jobs are not automatically revived. Prompt/content checks, paid confirmation, duplicate prevention and technical budgets remain. The running backend reports `none`; existing fox/gorilla access and unchanged paid reservation count were verified. All **29 backend tests pass**, including immediate readiness, invalid-GLB rejection, saved reuse/restart, and releasing waiting files without provider calls. No new paid test was submitted. No new UI or Inspector hookups are required.
+
+`openai` and `manual` remain available as explicit configuration choices; invalid mode names fail startup. Assets marked `skipped_by_owner` are available only to their owner while `none` is selected. Reenabling review hides those assets from library access until they are separately reviewed. Development library listing follows the same configured mode.
+
+**Current paid-count setting:** at the owner's request, both `MAX_LIFETIME_PAID_GENERATIONS` and `MAX_GENERATIONS_PER_SESSION` are now `-1` (unlimited). The backend was restarted; authenticated capabilities report `limit: null`, `unlimited: true`, and `perSessionLimit: null`. Existing history remains at two paid reservations; this change submitted no task. Explicit paid confirmation, duplicate prevention, one-at-a-time generation, rate limits, storage/model budgets, content checks and manual asset approval remain active. All **27 backend tests pass**, including unlimited quotas, preserved history and idempotence. Defaults in `.env.example` remain finite; zero blocks paid tasks and values below `-1` are invalid.
+
+**Current local review setting:** `MODEL_REVIEW_MODE=manual`, requested by the owner after the gorilla false rejection. Automatic image review is disabled. New validated models wait for explicit operator approval; approved library assets remain usable. Pre-generation text/content checks remain active. The backend was restarted and its reported manual mode and existing gorilla access were verified without creating a task.
+
+### Recovering a visually rejected existing asset
+
+Automatic visual review can return a false rejection. The current boolean reviewer does not record a detailed reason; do not infer that Tripo failed or submit a replacement automatically. Inspect the saved local preview/model first. An authenticated development operator can explicitly approve a reviewed rejected asset through `POST /api/creations/{job_id}/review` with `decision: APPROVE`, `confirm: APPROVE_REVIEWED_EXISTING_ASSET`, and a nonempty `note` (maximum 256 characters). This revalidates and registers existing bytes, preserves the previous status/review/error in the private review history, and never calls Tripo. Ordinary approval without this confirmation/note remains blocked for rejected assets. This is a trusted local operator capability, not a production multi-user moderation console. No new Unity UI or Inspector assignments are required.
+
+The gorilla task `ea866475-302f-4324-9ee9-cc55d78feedc` completed and its GLB passed validation (5,010 triangles, one material, 3,163,224 bytes). After local preview inspection, the existing asset was explicitly approved with a recorded note and registered as `6a443999-3fa6-46fb-b269-bbabbf98abdb`. Gorilla category matching was added. Authenticated saved-model search and validated model retrieval passed; paid reservations remained **2 before and after recovery**. All 26 backend tests pass, including guarded review override/audit and gorilla pose matching. No new Unity/headset runtime test was performed for this particular gorilla recovery.
+
+**Current milestone:** the real sleeping fox is validated, approved and stored persistently. Keep `ENABLE_GENERATION=false`; the single lifetime paid reservation has been used. Follow [Creation Library setup, routes, limits, management and Quest instructions](../Documentation/CreationLibrary.md). Do not run another fixed-cat or fox paid test. [Live validation results](../Documentation/CreationLibraryValidation.md) supersede the older test instructions below.
+
+The backend now supports structured OpenAI conversation, server-issued proposals, explicit confirmation, dynamic Tripo v3 tasks, asynchronous polling, bounded GLB validation and an asset-review gate. The original fixed-cat API remains available for development. The integrated creation scene and offline GLB demonstration are documented in [the creation README](../Assets/HealSphere/Creation/README.md). The fixed-cat instructions below are optional and are not required to play that scene.
 
 ## Backend setup
 
-Use Node.js 22 or newer (tested with 24). Dependencies: Express 5, dotenv, Khronos `gltf-validator`, and `image-size`. `package-lock.json` pins the installed dependency graph.
+Use Node.js 24 or newer (tested with 24). Dependencies: Express 5, dotenv, Khronos `gltf-validator`, and `image-size`. `package-lock.json` pins the installed dependency graph.
 
 From the project root in PowerShell:
 
@@ -15,7 +31,7 @@ npm ci --ignore-scripts
 Copy-Item .env.example .env
 ```
 
-An existing `.env` was detected during implementation and deliberately left untouched. Edit it locally; do not paste its contents into chat, Unity, or logs:
+Existing provider keys were preserved; a distinct private backend capability was securely configured. Edit it locally; do not paste its contents into chat, Unity, or logs:
 
 ```dotenv
 TRIPO_API_KEY=your_real_key_from_the_tripo_developer_console
@@ -23,7 +39,7 @@ BACKEND_ACCESS_TOKEN=a_distinct_random_local_access_token_of_at_least_32_charact
 HOST=127.0.0.1
 PORT=3000
 ENABLE_GENERATION=false
-MODEL_DOWNLOAD_HOSTS=tripo3d.ai
+MODEL_DOWNLOAD_HOSTS=tripo3d.ai,openapi-dl.data.tripo3d.com
 ```
 
 Generate a random local token if needed with `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`. The local backend token is a development access capability, **never** the Tripo API key. Keep it out of committed scenes and public builds. `.gitignore` excludes `.env` variants, `node_modules`, logs, and downloaded data; `.env.example` is explicitly included. Check with `git check-ignore Backend/.env` from the project root. Ignoring does not remove secrets already committed in history.
@@ -61,7 +77,7 @@ Invoke-RestMethod http://127.0.0.1:3000/api/balance -Headers $headers
 
 No UI is needed for the Editor test. Open the component's three-dot menu (or right-click its header) during Play Mode to find **Tripo/** commands. `Status`, `Progress`, `LastError`, `IsBusy`, and `StateChanged` are available to a future presenter referencing visually authored UI. If headset buttons are wanted later, manually author a world-space Canvas and Buttons in the Editor and bind their OnClick events to these public methods; no such UI is created here.
 
-## One explicit paid test, review, and display
+## Archived fixed-cat paid test (do not run for this milestone)
 
 1. Start the backend with generation disabled. Enter Play Mode, assign the local access token, then invoke **1 Check Backend Connection (Free)** and **2 Check Authentication And Balance (Free)**. Read the Unity Console. Play Mode itself submits nothing.
 2. When ready for one charge, set `ENABLE_GENERATION=true` in `.env` and restart the backend. Invoke **3 Generate ONE Test Cat (PAID, Explicit)** once. Alternatively, use this explicit command instead of the Unity command:

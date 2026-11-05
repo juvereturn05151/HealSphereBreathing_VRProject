@@ -1,0 +1,1 @@
+{"name":"HealSphere.Creation.Export.Editor","references":["glTFast.Export","glTFast"],"includePlatforms":["Editor"],"autoReferenced":true}

@@ -1,0 +1,2 @@
+Running authored-scene MOCK provider (incomplete fixture mesh, not a generated fox) integration check, accelerated guidance; no real provider calls.
+PASS: assigned references, no missing scripts, authored buttons, empty/vague requests and clarification, explicit confirmation, zero-cost real GLB import, three-cycle hold, actual surface particles, inhale/exhale, pause/resume, original materials and textures, two completed creations, cancellation cleanup, particle cleanup, Just breathe scene transition, no runtime errors.

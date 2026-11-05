@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22" },
-  "scripts": { "start": "node src/server.js", "test": "node --test" },
+  "engines": { "node": ">=24" },
+  "scripts": { "start": "node --use-system-ca src/server.js", "test": "node --test", "library": "node tools/library.mjs" },
   "dependencies": {
     "dotenv": "^17.2.3",
     "express": "^5.1.0",

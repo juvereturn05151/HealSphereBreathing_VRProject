@@ -4,7 +4,7 @@ import { imageSize } from 'image-size';
 export const MAX_BYTES = 32 * 1024 * 1024;
 
 // Reject external resources and compressed assets that could expand beyond our budgets.
-export async function validateGlb(bytes) {
+export async function validateGlb(bytes, { maxTriangles = 20000 } = {}) {
   const reject = () => { throw new Error('MODEL_REJECTED'); };
   if (bytes.length < 28 || bytes.length > MAX_BYTES || bytes.readUInt32LE(0) !== 0x46546c67 ||
       bytes.readUInt32LE(4) !== 2 || bytes.readUInt32LE(8) !== bytes.length ||
@@ -41,7 +41,7 @@ export async function validateGlb(bytes) {
     if (node.extensions) reject();
     if (node.mesh !== undefined) triangles += meshTriangles[node.mesh] ?? Infinity;
   }
-  if (!triangles || triangles > 20000 || vertices > 60000) reject();
+  if (!triangles || triangles > maxTriangles || vertices > 60000) reject();
   let pixels = 0;
   for (const image of doc.images ?? []) {
     if (!['image/png', 'image/jpeg'].includes(image.mimeType)) reject();
