@@ -1,3 +1,13 @@
+# Current animal-reflection experience
+
+Open `Scenes/HealSphereCreation.unity` and choose **Begin gently**. The current flow collects one animal and two optional thoughts (typed or push-to-talk), offers Back/edit/skip, then reveals three same-animal Reflection/Support/Hope designs. The saved scene already has the visually authored microphone, voice mute and volume buttons and assigned private serialized references. The existing XR rig, spatial keyboard, model loader, particles, original materials, music and chimes are reused.
+
+Use [the current animal reflection guide](../../../../Documentation/AnimalReflection.md) for setup, Inspector assignments, backend/audio routes, privacy, costs and exact Quest installation. See [current verification](../../../../Documentation/AnimalReflectionValidation.md). Offline illustrations support six animals × three distinct poses. They are simple placeholders, not personalized generated models. Global generation remains disabled; missing live models require separate owner task AND credit authorization. No live paid generation was performed for this milestone.
+
+The new APK is `Builds/HealSphereReflection/HealSphereReflection.apk`. **Begin again** clears private answers/audio and the three created objects. **Just breathe** preserves the old automatic two-minute wellness experience. The material below is the archived freeform creation workflow and low-level configuration reference; its old buttons and default-cat sequence do not describe the new launch flow.
+
+---
+
 # HealSphere creation mode
 
 **Current update:** the real sleeping fox is saved in the persistent Creation Library and can be reused automatically through this scene's existing breathing/reveal pipeline. Use [the current library guide](../../../../Documentation/CreationLibrary.md) and [live verification report](../../../../Documentation/CreationLibraryValidation.md). Keep paid generation disabled: the one authorized test already succeeded. No new UI or Inspector hookups are required.
@@ -78,6 +88,16 @@ No UI hierarchy is constructed by runtime or Editor C#. The saved scene contains
 The old wellness director/presenter/interaction controller are disabled only in the creation scene. Its XR rig, audio, environment and companion systems are reused. `HealSphere > Creation > Bind Authored Creation UI And Set Launch Scene` rebinds existing named components and saves; it never creates UI. Do not rerun the assembly menu over the existing scene: it intentionally refuses overwrite.
 
 Adjust charge/reveal cycles, settle time, model bounds, generation timeout and demo load delay on the creation components. Adjust music volume using MomentConfiguration. Scene composition and UI layout belong in the Unity Editor. Keep models and panels stationary relative to the world; do not move the tracked camera or add forced locomotion.
+
+### Position the animal
+
+In `HealSphereCreation`, select **Creation Staging Anchor** and move it to the intended standing height. Its pivot marks the bottom center of the fitted animal. Move or rotate this anchor in Edit Mode and save the scene. The **Arrange Existing Creation Anchors** menu restores its preset position.
+
+On **TripoModelLoader**, keep **Creation Staging Anchor** assigned to that object. Leave **Animal Placement Root** empty, or assign a direct child of the staging anchor if you want a separate authored placement socket. Keep the anchor and socket at unit scale. **Target Animal Height** scales the geometry uniformly, **Model Rotation Offset** corrects its imported axes, and **Model Position Offset** nudges the fitted geometry in local meters. Start with all offsets at zero and try a Y rotation of 90°, −90°, or 180° for an individual model that faces sideways or backward.
+
+Both camera options default to off so the saved anchor pose controls the initial placement. Enable **Automatically Face Camera** to replace the initial anchor yaw with an upright turn toward the viewer. Enable **Use Camera-Relative Staging** to stage the animal 1.75 m ahead and 0.65 m below the eye position sampled when creation begins. Enable both for a centered, player-facing reveal. Head movement after that sample leaves the placement stationary. The brief awakening approach is applied in local space, so the animal remains attached to the anchor.
+
+To test the active animal flow, use the offline animal in Play Mode, then repeat with an existing saved backend GLB. Check the reveal and awakening after moving and rotating the anchor with both camera options off. Repeat with both options on and move your head during the reveal. For automated coverage, the mock-library test checks that saved and offline GLBs remain parented to the anchor and respond to its translation and rotation.
 
 ## Tests and troubleshooting
 

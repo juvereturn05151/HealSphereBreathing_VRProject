@@ -95,5 +95,12 @@ export function createConversation({ openaiKey, openaiModel = 'gpt-4.1-mini', fe
     const text = data.output?.flatMap(x => x.content ?? []).find(x => x.type === 'output_text')?.text;
     return data.status === 'completed' && JSON.parse(text ?? '{}').approved === true;
   }
-  return { understand, reviewImage, configured, proposal: id => { const p = proposals.get(id); return p?.expires > clock() ? p : null; } };
+  function offerPublicConcept(request, prompt, name, planId) {
+    for (const [id, item] of proposals) if (item.expires < clock()) proposals.delete(id);
+    if (!safeText(request, 512) || !safeText(prompt, 1024) || !safeText(name, 70) || proposals.size + clarifications.size >= 64) throw new Error('INVALID_REFLECTION_RESPONSE');
+    const id = randomUUID();
+    proposals.set(id, { originalRequest: request, prompt, displayName: name, accepted: true, source: 'reflection', reflection: true, reflection_plan: planId, expires: clock() + 30 * 60000 });
+    return id;
+  }
+  return { understand, reviewImage, configured, offerPublicConcept, forgetPublicConcept: id => { if (proposals.get(id)?.reflection) proposals.delete(id); }, proposal: id => { const p = proposals.get(id); return p?.expires > clock() ? p : null; } };
 }

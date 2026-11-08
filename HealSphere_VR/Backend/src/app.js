@@ -6,6 +6,7 @@ import { MAX_BYTES, validateGlb } from './glb.js';
 import { mountCreations } from './creations.js';
 import { openLibrary } from './library.js';
 import { generationSettings } from './limits.js';
+import { mountReflection } from './reflection-routes.js';
 
 export const CAT_PROMPT = 'Cute very chubby orange tabby cat, rounded body, short legs, fluffy cheeks, tiny paws, closed smiling eyes, cream belly, soft pastel colors, stylized 3D game asset, friendly and relaxing, suitable for a cozy VR wellness experience.';
 const API = 'https://openapi.tripo3d.ai/v3';
@@ -16,7 +17,8 @@ class SafeError extends Error {
 
 export async function createApp({ key, token, enabled = false, dataDir, hosts = ['tripo3d.ai', 'openapi-dl.data.tripo3d.com'],
   fetchFn = fetch, pollMs = 2500, taskTimeoutMs = 600000, requestTimeoutMs = 30000,
-  openaiKey, openaiModel = 'gpt-4.1-mini', offlineConversation = true, reviewMode = 'openai', demoModelPath, demoDelayMs = 2500, generationLimits = {} }) {
+  openaiKey, openaiModel = 'gpt-4.1-mini', offlineConversation = true, reviewMode = 'openai', demoModelPath, demoDelayMs = 2500, generationLimits = {},
+  reflectionDemoDir = path.resolve('../Assets/StreamingAssets/ReflectionDemo'), speechModel = 'gpt-4o-mini-tts', transcriptionModel = 'gpt-transcribe', speechVoice = 'marin', speechEnabled = true }) {
   if (!token || token.length < 32 || token === key || token.startsWith('replace_'))
     throw new Error('Configure a distinct BACKEND_ACCESS_TOKEN of at least 32 characters.');
   if (!['openai', 'manual', 'none'].includes(reviewMode)) throw new Error('INVALID_MODEL_REVIEW_MODE');
@@ -140,7 +142,7 @@ export async function createApp({ key, token, enabled = false, dataDir, hosts = 
     if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return res.status(401).json({ error: 'BACKEND_AUTH_REQUIRED' });
     next();
   });
-  app.use(express.json({ limit: '2kb' }));
+  app.use(express.json({ limit: '8kb' })); // Animal plus two bounded UTF-8 thoughts; endpoint schemas still enforce text limits.
   const rateWindow = new Map();
   app.use('/api', (req, res, next) => {
     const now = Date.now(); let rate = rateWindow.get(owner);
@@ -192,10 +194,12 @@ export async function createApp({ key, token, enabled = false, dataDir, hosts = 
   });
   const creations = await mountCreations(app, { api, balance, downloadBytes, limitedBody, SafeError, dataDir, enabled, fetchFn,
     pollMs, taskTimeoutMs, openaiKey, openaiModel, offlineConversation, reviewMode, demoModelPath, demoDelayMs, library, limits, owner });
+  const reflectionServices = mountReflection(app, { library, conversation: creations.conversation, owner, openaiKey, openaiModel, fetchFn, SafeError,
+    demoDir: reflectionDemoDir, speechDir: path.join(dataDir, 'speech'), ttsModel: speechModel, sttModel: transcriptionModel, voice: speechVoice, enabled: speechEnabled });
   app.use((req, res) => res.status(404).json({ error: 'NOT_FOUND' }));
   app.use((err, req, res, next) => {
     if (res.headersSent) return next(err);
     res.status(err instanceof SafeError ? err.status : 500).json({ error: err instanceof SafeError ? err.message : 'INTERNAL_OR_INVALID_REQUEST' });
   });
-  return { app, library, conversation: creations.conversation, waitForWorker: async () => { await worker; await creations.wait(); }, close: () => library.close() };
+  return { app, library, conversation: creations.conversation, ...reflectionServices, waitForWorker: async () => { await worker; await creations.wait(); }, close: () => library.close() };
 }

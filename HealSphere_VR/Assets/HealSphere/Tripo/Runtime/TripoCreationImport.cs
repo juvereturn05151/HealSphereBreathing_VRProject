@@ -10,8 +10,22 @@ namespace HealSphere.Tripo
 {
     public sealed partial class TripoModelLoader
     {
+        [Header("Animal Placement")]
+        [Tooltip("Optional placement socket directly under Creation Staging Anchor. Leave empty to use the anchor directly.")]
+        [SerializeField] private Transform animalPlacementRoot;
+        [Tooltip("Local offset in meters applied after centering and grounding the imported geometry.")]
+        [SerializeField] private Vector3 modelPositionOffset;
+        [Tooltip("Fitted animal height in meters before the awakening animation.")]
+        [SerializeField, Range(0.1f, 1f)] private float targetAnimalHeight = 0.45f;
+        [Tooltip("Use the camera's initial position to set upright yaw. Turn off to use the authored anchor orientation.")]
+        [SerializeField] private bool automaticallyFaceCamera;
+        [Tooltip("Stage 1.75 meters along the headset's horizontal forward direction once per creation, 0.65 meters below eye height.")]
+        [SerializeField] private bool useCameraRelativeStaging;
+
         public bool LiveConnectionRequested { get; private set; }
         public bool HasBackendConnection => !string.IsNullOrWhiteSpace(backendUrl) && (backendAccessToken?.Length ?? 0) >= 32;
+        public Task<byte[]> PrepareAnimalAsync(string json, CancellationToken token) =>
+            Request("/api/animals/prepare", json, token);
         [Serializable] private sealed class LocalConnection
         {
             [SerializeField] private string url;
@@ -40,7 +54,8 @@ namespace HealSphere.Tripo
                 throw new InvalidOperationException("Invalid creation route.");
             return Request(route, json, cancellationToken);
         }
-        public async Task<GameObject> LoadCreationAsync(byte[] bytes, string name, bool reviewedDemo, CancellationToken cancellationToken)
+        public async Task<GameObject> LoadCreationAsync(byte[] bytes, string name, bool reviewedDemo,
+            CancellationToken cancellationToken, bool stageAnimal = false, Pose? viewerAtStart = null)
         {
             RequireAnchor();
             if (bytes == null || bytes.Length < 28 || bytes.Length > MaxModelBytes || BitConverter.ToUInt32(bytes, 0) != 0x46546c67 ||
@@ -51,8 +66,16 @@ namespace HealSphere.Tripo
             {
                 if (!await importer.Load(bytes, cancellationToken: cancellationToken)) throw new InvalidOperationException("GLB import failed.");
                 cancellationToken.ThrowIfCancellationRequested();
-                candidate = new GameObject(name); candidate.SetActive(false); candidate.transform.SetParent(creationAnchor, false);
-                if (!await importer.InstantiateMainSceneAsync(candidate.transform, cancellationToken)) throw new InvalidOperationException("GLB instantiation failed.");
+                candidate = new GameObject(name); candidate.SetActive(false);
+                var geometry = candidate.transform;
+                if (stageAnimal)
+                {
+                    PositionAnimal(candidate.transform, viewerAtStart);
+                    geometry = new GameObject("Generated Animal Model").transform;
+                    geometry.SetParent(candidate.transform, false);
+                }
+                else candidate.transform.SetParent(creationAnchor, false);
+                if (!await importer.InstantiateMainSceneAsync(geometry, cancellationToken)) throw new InvalidOperationException("GLB instantiation failed.");
                 cancellationToken.ThrowIfCancellationRequested();
                 long vertices = 0, triangles = 0; int materials = 0;
                 foreach (var filter in candidate.GetComponentsInChildren<MeshFilter>(true))
@@ -64,11 +87,37 @@ namespace HealSphere.Tripo
                 { materials += renderer.sharedMaterials.Length; renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; renderer.receiveShadows = false; }
                 if (vertices > 60000 || triangles < 1 || triangles > (reviewedDemo ? 60000 : 20000) || materials > 8)
                     throw new InvalidOperationException("Model exceeds the Quest geometry/material budget.");
-                Fit(candidate); candidate.AddComponent<RuntimeModelOwnership>().Own(importer); importer = null;
+                if (stageAnimal) Fit(geometry.gameObject, candidate.transform, targetAnimalHeight, modelPositionOffset);
+                else Fit(candidate);
+                candidate.AddComponent<RuntimeModelOwnership>().Own(importer); importer = null;
                 var result = candidate; candidate = null; return result; // Remains hidden until the reveal system is prepared.
             }
             finally { if (candidate != null) Destroy(candidate); importer?.Dispose(); }
         }
+
+        private void PositionAnimal(Transform placement, Pose? viewerAtStart)
+        {
+            if (animalPlacementRoot != null && animalPlacementRoot.parent != creationAnchor)
+                throw new InvalidOperationException("Animal Placement Root must be a direct child of Creation Staging Anchor.");
+            placement.SetParent(animalPlacementRoot != null ? animalPlacementRoot : creationAnchor, false);
+            if (!viewerAtStart.HasValue) return;
+
+            var viewer = viewerAtStart.Value;
+            if (useCameraRelativeStaging)
+            {
+                var forward = Vector3.ProjectOnPlane(viewer.rotation * Vector3.forward, Vector3.up);
+                if (forward.sqrMagnitude < 0.001f)
+                    forward = Vector3.ProjectOnPlane(placement.position - viewer.position, Vector3.up);
+                if (forward.sqrMagnitude < 0.001f) forward = Vector3.forward;
+                placement.position = viewer.position + forward.normalized * 1.75f - Vector3.up * 0.65f;
+            }
+            if (automaticallyFaceCamera)
+            {
+                var towardViewer = Vector3.ProjectOnPlane(viewer.position - placement.position, Vector3.up);
+                if (towardViewer.sqrMagnitude > 0.001f) placement.rotation = Quaternion.LookRotation(towardViewer);
+            }
+        }
+
         public async Task<byte[]> ReadLocalDemoAsync(CancellationToken cancellationToken)
         {
             string path = Path.Combine(Application.streamingAssetsPath, "healsphere-cat-demo.glb");

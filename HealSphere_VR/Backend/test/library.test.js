@@ -13,7 +13,7 @@ function fixture() {
   const raw = JSON.stringify(doc), json = Buffer.from(raw.padEnd(Math.ceil(Buffer.byteLength(raw) / 4) * 4, ' '));
   const b = Buffer.alloc(28 + json.length + 36); b.writeUInt32LE(0x46546c67); b.writeUInt32LE(2, 4); b.writeUInt32LE(b.length, 8); b.writeUInt32LE(json.length, 12); b.writeUInt32LE(0x4e4f534a, 16); json.copy(b, 20); b.writeUInt32LE(36, 20 + json.length); b.writeUInt32LE(0x004e4942, 24 + json.length); b.writeFloatLE(1, 28 + json.length + 12); b.writeFloatLE(1, 28 + json.length + 28); return b;
 }
-const fox = { owner: 'owner-a', bytes: fixture(), originalRequest: 'I want a cute sleeping fox.', prompt: 'Orange little fox curled up and sleeping, soft pastel stylized low-poly model', displayName: 'Sleeping fox', provider: 'tripo', taskId: 'mock-task', source: 'AI-generated', review: 'operator_review' };
+const fox = { owner: 'owner-a', bytes: fixture(), originalRequest: 'I want a cute sleeping fox.', prompt: 'Orange little fox curled up and sleeping peacefully, soft pastel stylized low-poly model', displayName: 'Sleeping fox', provider: 'tripo', taskId: 'mock-task', source: 'AI-generated', review: 'operator_review' };
 async function temp() { return mkdtemp(path.join(tmpdir(), 'healsphere-library-')); }
 
 test('two-stage matching handles exact/equivalent wording and rejects important differences or unknown requirements', () => {
@@ -24,6 +24,26 @@ test('two-stage matching handles exact/equivalent wording and rejects important 
   assert.equal(satisfies(requirements('a curled sleeping fox'), requirements('an orange sleeping fox')), false, 'Never infer an unverified curled pose');
   assert.equal(satisfies(requirements('I want a gorilla'), requirements('One complete-body gorilla, low-poly pastel friendly standing pose')), true);
   assert.equal(satisfies(requirements('a sleeping gorilla'), requirements('a standing gorilla')), false);
+  assert.equal(satisfies(requirements('a peaceful sleeping fox'), requirements('an angry sleeping fox')), false);
+  assert.equal(satisfies(requirements('a warm standing fox'), requirements('a gentle seated fox')), false);
+  for (const animal of ['elephant','deer','panda','bear','otter','horse','dolphin']) {
+    assert.equal(satisfies(requirements('a gentle seated ' + animal), requirements('gentle seated ' + animal + ' pastel')), true);
+    assert.equal(satisfies(requirements('a gentle seated ' + animal), requirements('gentle seated fox pastel')), false);
+  }
+});
+
+test('plan credit reservations survive reopening SQLite and do not refund ambiguous tasks', async () => {
+  const dataDir = await temp(); let library = await openLibrary({ dataDir });
+  const authorization = { id: randomUUID(), maxTasks: 3, creditBudget: 20, creditCeiling: 10 };
+  const reserve = n => ({ key: 'grant-key-' + n, owner: fox.owner, sessionId: 'grant-session', requestKey: 'different-' + n,
+    jobId: randomUUID(), perSession: -1, lifetime: -1, authorization });
+  const first = reserve(1); library.reserve(first); library.close();
+  library = await openLibrary({ dataDir });
+  assert.equal(library.reserve({ ...first, jobId: randomUUID() }), first.jobId);
+  const second = reserve(2); library.reserve(second); library.recordCredits(second.jobId, 12); library.close();
+  library = await openLibrary({ dataDir });
+  assert.throws(() => library.reserve(reserve(3)), /REFLECTION_AUTHORIZATION_BUDGET_EXHAUSTED/);
+  assert.equal(library.submissionCount(), 2); library.close();
 });
 test('approved library persists, deduplicates files, retrieves validated bytes and excludes rejected/unreviewed models', async () => {
   const dataDir = await temp(); let library = await openLibrary({ dataDir });
@@ -146,7 +166,7 @@ test('equivalent in-progress requests in one session return the durable existing
   const post = async (route, body) => (await fetch('http://127.0.0.1:' + server.address().port + route, { method: 'POST', headers: { 'X-Backend-Token': token, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json();
   try {
     const { session_id } = await post('/api/sessions', {});
-    const first = await post('/api/conversation', { idea: 'a cute sleeping fox' });
+    const first = await post('/api/conversation', { idea: 'a cute peaceful sleeping fox' });
     const job = await post('/api/creations', { proposal_id: first.proposal_id, session_id, mode: 'live', confirm: 'CREATE_ONE_MODEL' });
     const second = await post('/api/conversation', { idea: 'a little fox sleeping peacefully' });
     const recovered = await post('/api/creations', { proposal_id: second.proposal_id, session_id, mode: 'live', confirm: 'CREATE_ONE_MODEL' });

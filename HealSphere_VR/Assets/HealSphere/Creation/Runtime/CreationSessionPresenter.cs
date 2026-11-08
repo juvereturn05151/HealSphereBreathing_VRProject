@@ -23,6 +23,9 @@ namespace HealSphere.Creation
         public event Action SecondaryRequested;
         public event Action WellnessRequested;
         public string RequestText => requestInput != null ? requestInput.text : "";
+        internal Transform Viewer => xrCamera != null && xrCamera.isActiveAndEnabled ? xrCamera.transform : desktopCamera != null ? desktopCamera.transform : null;
+        public TMP_InputField RequestInput => requestInput;
+        public void CloseKeyboard() => keyboard.Close();
         public bool IsConfigured => messageText != null && requestInput != null && keyboard != null && requestEntryRoot != null && primaryButton != null && secondaryButton != null && wellnessButton != null;
         private void OnEnable()
         {
@@ -39,16 +42,18 @@ namespace HealSphere.Creation
             foreach (var canvas in inputCanvases)
                 if (canvas != null && canvas.worldCamera != activeCamera) canvas.worldCamera = activeCamera;
         }
-        public void Present(string message, string primary, string secondary, bool enteringRequest, bool wellness = true)
+        public void Present(string message, string primary, string secondary, bool enteringRequest, bool wellness = true, bool showBrand = true)
         {
             if (!IsConfigured) return;
-            messageText.text = "<size=24><color=#805B79>HEALSPHERE · DREAM CREATION</color></size>\n\n" + message;
+            messageText.text = showBrand ? "<size=24><color=#805B79>HEALSPHERE · DREAM CREATION</color></size>\n\n" + message :
+                "<color=#FFF5FF>" + message + "</color>";
             SetButton(primaryButton, primary); SetButton(secondaryButton, secondary); SetButton(wellnessButton, wellness ? "Just breathe" : "");
             if (requestEntryRoot.activeSelf != enteringRequest) requestEntryRoot.SetActive(enteringRequest);
             if (!enteringRequest) keyboard.Close();
         }
         public void ClearRequest() { if (requestInput != null) requestInput.text = ""; }
-        public void SetRequestForTesting(string value) { if (requestInput != null) requestInput.text = value; }
+        public void SetRequestText(string value) { if (requestInput != null) requestInput.text = value; }
+        public void SetRequestForTesting(string value) => SetRequestText(value);
         private static void SetButton(Button button, string label)
         {
             button.gameObject.SetActive(!string.IsNullOrEmpty(label));

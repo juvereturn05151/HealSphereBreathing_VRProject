@@ -15,6 +15,9 @@ namespace HealSphere.Breathing
         private float currentFadeSeconds;
         private float activityLevel = 1;
         private bool paused;
+        private float narrationDuck = 1;
+        private bool narrationActive;
+        public void SetNarrationActive(bool value) => narrationActive = value;
         public bool IsConfigured => ambienceSource != null && chimeSource != null && ambienceClip != null && creationChime != null;
         public void StartAmbience()
         {
@@ -40,7 +43,8 @@ namespace HealSphere.Breathing
         {
             if (paused) return;
             gain = Mathf.MoveTowards(gain, target, Time.deltaTime / Mathf.Max(0.5f, currentFadeSeconds > 0 ? currentFadeSeconds : fadeSeconds));
-            if (ambienceSource != null) { ambienceSource.volume = gain * masterVolume * activityLevel; if (gain == 0 && target == 0 && ambienceSource.isPlaying) ambienceSource.Stop(); }
+            narrationDuck = Mathf.MoveTowards(narrationDuck, narrationActive ? .4f : 1, Time.unscaledDeltaTime * 2);
+            if (ambienceSource != null) { ambienceSource.volume = gain * masterVolume * activityLevel * narrationDuck; if (gain == 0 && target == 0 && ambienceSource.isPlaying) ambienceSource.Stop(); }
         }
         private void OnDisable() { if (ambienceSource != null) ambienceSource.Stop(); if (chimeSource != null) chimeSource.Stop(); gain = target = 0; }
     }

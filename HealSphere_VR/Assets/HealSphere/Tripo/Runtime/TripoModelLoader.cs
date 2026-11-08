@@ -19,7 +19,8 @@ namespace HealSphere.Tripo
         [SerializeField, Min(2)] private float pollIntervalSeconds = 3f;
 
         [Header("Scene References")]
-        [Tooltip("Assign the existing CreationAnchor_01. Keep anchor scale at (1,1,1).")]
+        [InspectorName("Creation Staging Anchor")]
+        [Tooltip("Sets the authored reveal position and orientation. Keep its scale at (1,1,1).")]
         [SerializeField] private Transform creationAnchor;
         [SerializeField] private GameObject offlineFallbackPrefab;
         [SerializeField] private bool useFallbackOnError = true;
@@ -28,6 +29,8 @@ namespace HealSphere.Tripo
 
         [Header("Display Bounds (Meters, In Anchor Space)")]
         [SerializeField] private Vector3 maximumSize = new Vector3(0.5f, 0.5f, 0.5f);
+        [InspectorName("Model Rotation Offset")]
+        [Tooltip("Local Euler correction for the imported asset's forward axis. Try Y = 90, -90, or 180 for sideways or backward models.")]
         [SerializeField] private Vector3 modelRotation;
 
         public string Status { get; private set; } = "Idle";
@@ -174,6 +177,9 @@ namespace HealSphere.Tripo
         }
 
         private async Task<byte[]> Request(string route, string body, CancellationToken ct)
+            => await RequestBytes(route, body == null ? null : System.Text.Encoding.UTF8.GetBytes(body), "application/json", ct);
+
+        private async Task<byte[]> RequestBytes(string route, byte[] body, string contentType, CancellationToken ct)
         {
             if (!Uri.TryCreate(backendUrl, UriKind.Absolute, out var root) ||
                 (root.Scheme != "http" && root.Scheme != "https") || !string.IsNullOrEmpty(root.UserInfo) ||
@@ -186,11 +192,11 @@ namespace HealSphere.Tripo
             if (route != "/health") request.SetRequestHeader("X-Backend-Token", backendAccessToken ?? "");
             if (body != null)
             {
-                request.uploadHandler = new UploadHandlerRaw(System.Text.Encoding.UTF8.GetBytes(body));
-                request.SetRequestHeader("Content-Type", "application/json");
+                request.uploadHandler = new UploadHandlerRaw(body);
+                request.SetRequestHeader("Content-Type", contentType);
             }
             var pending = request.SendWebRequest();
-            var limit = route.EndsWith("/model", StringComparison.Ordinal) ? MaxModelBytes : 65536;
+            var limit = route.EndsWith("/model", StringComparison.Ordinal) ? MaxModelBytes : route.StartsWith("/api/speech/audio/", StringComparison.Ordinal) ? 4 * 1024 * 1024 : 65536;
             try
             {
                 while (!pending.isDone)
@@ -202,6 +208,8 @@ namespace HealSphere.Tripo
                 ct.ThrowIfCancellationRequested();
                 if (request.result != UnityWebRequest.Result.Success)
                 {
+                    if (request.result == UnityWebRequest.Result.ConnectionError && request.responseCode <= 0)
+                        throw new InvalidOperationException("Backend: CONNECTION_UNAVAILABLE");
                     if (route.StartsWith("/api/", StringComparison.Ordinal) && request.downloadHandler.data?.Length < 65536)
                     {
                         try
@@ -257,9 +265,10 @@ namespace HealSphere.Tripo
             }
         }
 
-        private void Fit(GameObject model)
+        private void Fit(GameObject model, Transform fitSpace = null, float targetHeight = 0, Vector3 positionOffset = default)
         {
             var root = model.transform;
+            fitSpace ??= creationAnchor;
             root.localPosition = Vector3.zero;
             root.localRotation = Quaternion.Euler(modelRotation);
             root.localScale = Vector3.one;
@@ -273,7 +282,7 @@ namespace HealSphere.Tripo
                 for (var i = 0; i < 8; i++)
                 {
                     var corner = b.center + Vector3.Scale(b.extents, new Vector3((i & 1) == 0 ? -1 : 1, (i & 2) == 0 ? -1 : 1, (i & 4) == 0 ? -1 : 1));
-                    var p = creationAnchor.InverseTransformPoint(renderer.transform.TransformPoint(corner));
+                    var p = fitSpace.InverseTransformPoint(renderer.transform.TransformPoint(corner));
                     if (!float.IsFinite(p.x) || !float.IsFinite(p.y) || !float.IsFinite(p.z)) throw new InvalidOperationException("Invalid model bounds.");
                     if (!initialized) { bounds = new Bounds(p, Vector3.zero); initialized = true; }
                     else bounds.Encapsulate(p);
@@ -281,9 +290,11 @@ namespace HealSphere.Tripo
             }
             var size = bounds.size;
             if (size.sqrMagnitude < 0.00000001f) throw new InvalidOperationException("Model bounds are empty.");
-            var scale = Mathf.Min(maximumSize.x / Mathf.Max(size.x, 0.0001f), maximumSize.y / Mathf.Max(size.y, 0.0001f), maximumSize.z / Mathf.Max(size.z, 0.0001f));
+            var scale = targetHeight > 0 && size.y > 0.0001f
+                ? targetHeight / size.y
+                : Mathf.Min(maximumSize.x / Mathf.Max(size.x, 0.0001f), maximumSize.y / Mathf.Max(size.y, 0.0001f), maximumSize.z / Mathf.Max(size.z, 0.0001f));
             root.localScale = Vector3.one * scale;
-            root.localPosition = -new Vector3(bounds.center.x, bounds.min.y, bounds.center.z) * scale;
+            root.localPosition = positionOffset - new Vector3(bounds.center.x, bounds.min.y, bounds.center.z) * scale;
         }
 
         private void ShowFallback()

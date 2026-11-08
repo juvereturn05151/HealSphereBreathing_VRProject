@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
 
 const groups = {
-  category: { gorilla: ['gorilla', 'gorillas'], fox: ['fox', 'foxes'], cat: ['cat', 'kitten', 'tabby'], rabbit: ['rabbit', 'bunny'], tree: ['tree'], moon: ['moon', 'crescent'], dragon: ['dragon'], dog: ['dog', 'puppy'], flower: ['flower'], star: ['star'], mushroom: ['mushroom'], turtle: ['turtle'], bird: ['bird'], fish: ['fish'], butterfly: ['butterfly'] },
+  category: { red_panda: ['red panda'], owl: ['owl'], lion: ['lion'], gorilla: ['gorilla', 'gorillas'], fox: ['fox', 'foxes'], cat: ['cat', 'kitten', 'tabby'], rabbit: ['rabbit', 'bunny'], tree: ['tree'], moon: ['moon', 'crescent'], dragon: ['dragon'], dog: ['dog', 'puppy'], flower: ['flower'], star: ['star'], mushroom: ['mushroom'], turtle: ['turtle'], bird: ['bird'], fish: ['fish'], butterfly: ['butterfly'], elephant: ['elephant'], deer: ['deer'], panda: ['panda'], bear: ['bear'], otter: ['otter'], horse: ['horse'], dolphin: ['dolphin'] },
   color: { orange: ['orange', 'ginger'], blue: ['blue', 'azure'], purple: ['purple', 'violet'], red: ['red'], pink: ['pink'], white: ['white'], black: ['black'], brown: ['brown'], green: ['green'], yellow: ['yellow'], gray: ['gray', 'grey'], cream: ['cream'] },
   pose: { sleeping: ['taking a nap', 'napping', 'sleeping', 'asleep', 'sleep', 'snoozing'], curled: ['curled', 'curling'], seated: ['seated', 'sitting'], standing: ['standing'], flying: ['flying'], walking: ['walking'], lying: ['lying', 'laying'] },
+  expression: { calm: ['peaceful', 'peacefully', 'gentle', 'friendly', 'serene', 'relaxed', 'calming', 'relaxing'], warm: ['warm', 'hopeful', 'smiling', 'soft smile'], angry: ['angry', 'fierce', 'snarling'] },
   anatomy: { wings: ['winged', 'wings'], horns: ['horned', 'horns', 'horn'], extra_heads: ['two headed', 'three headed'], extra_legs: ['six legs', 'eight legs'] },
   accessories: { hat: ['hat', 'cap'], bow: ['bow', 'ribbon'], glasses: ['glasses', 'spectacles'], scarf: ['scarf'], crown: ['crown'], collar: ['collar'], armor: ['armor', 'armour'] },
   style: { low_poly: ['low poly', 'lowpoly'], realistic: ['realistic', 'photorealistic'], stylized: ['stylized', 'stylised', 'cartoon'], pastel: ['pastel'] },

@@ -22,6 +22,30 @@ export async function openLibrary({ dataDir, maxStorageBytes = 512 * 1024 * 1024
       request_key TEXT NOT NULL, job_id TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, created_at TEXT NOT NULL);
   `);
+  const submissionColumns = db.prepare('PRAGMA table_info(submissions)').all().map(x => x.name);
+  for (const [name, declaration] of [['authorization_id', "TEXT NOT NULL DEFAULT ''"], ['credits_reserved', 'INTEGER NOT NULL DEFAULT 0'], ['credits_consumed', 'INTEGER NOT NULL DEFAULT 0']])
+    if (!submissionColumns.includes(name)) db.exec('ALTER TABLE submissions ADD COLUMN ' + name + ' ' + declaration);
+  // Backfill taxonomy fields from existing descriptions. Keep reviews and asset files intact.
+  for (const row of db.prepare('SELECT id,category,attributes,original_request,normalized_prompt FROM creations').all()) {
+    const attributes = JSON.parse(row.attributes);
+    let category = row.category;
+    let changed = false;
+    if (!Object.hasOwn(attributes, 'expression')) {
+      attributes.expression = requirements(row.normalized_prompt).expression;
+      changed = true;
+    }
+    if (category === 'other' || category === 'panda') {
+      const request = requirements(row.original_request).category;
+      const prompt = requirements(row.normalized_prompt).category;
+      if (request.length === 1 && prompt.length === 1 && request[0] === prompt[0] &&
+          ['lion', 'owl', 'red_panda'].includes(request[0])) {
+        category = request[0];
+        attributes.category = request;
+        changed = true;
+      }
+    }
+    if (changed) db.prepare('UPDATE creations SET category=?,attributes=? WHERE id=?').run(category, JSON.stringify(attributes), row.id);
+  }
   const validId = value => typeof value === 'string' && /^[a-f0-9-]{36}$/.test(value);
   function access(row, owner) { return row && !row.retired &&
     (row.review !== 'skipped_by_owner' || allowUnreviewed && row.owner_id === owner) &&
@@ -61,7 +85,7 @@ export async function openLibrary({ dataDir, maxStorageBytes = 512 * 1024 * 1024
     const existing = db.prepare('SELECT * FROM creations WHERE owner_id=? AND content_hash=?').get(owner, hash);
     if (existing) {
       const prior = JSON.parse(existing.attributes);
-      if (['category','color','pose','anatomy','accessories','style','material','texture','age','size'].some(k => features[k]?.some(v => !prior[k]?.includes(v)))) throw new Error('CONTENT_METADATA_CONFLICT');
+      if (['category','color','pose','expression','anatomy','accessories','style','material','texture','age','size'].some(k => features[k]?.some(v => !prior[k]?.includes(v)))) throw new Error('CONTENT_METADATA_CONFLICT');
       return view(existing, owner);
     }
     await ensureSpace(bytes.length + (preview?.length ?? 0) + 8192);
@@ -104,7 +128,7 @@ export async function openLibrary({ dataDir, maxStorageBytes = 512 * 1024 * 1024
     const id = randomUUID(); db.prepare('INSERT INTO sessions VALUES (?,?,?)').run(id, owner, new Date().toISOString()); return id;
   }
   function validSession(id, owner) { return validId(id) && !!db.prepare('SELECT id FROM sessions WHERE id=? AND owner_id=?').get(id, owner); }
-  function reserve({ key, owner, sessionId, requestKey, jobId, perSession, lifetime }) {
+  function reserve({ key, owner, sessionId, requestKey, jobId, perSession, lifetime, authorization }) {
     db.exec('BEGIN IMMEDIATE');
     try {
       const prior = db.prepare('SELECT * FROM submissions WHERE idempotency_key=?').get(key);
@@ -113,7 +137,12 @@ export async function openLibrary({ dataDir, maxStorageBytes = 512 * 1024 * 1024
       if (active) { db.exec('COMMIT'); return active.job_id; }
       if (perSession !== -1 && db.prepare('SELECT COUNT(*) AS n FROM submissions WHERE owner_id=? AND session_id=?').get(owner, sessionId).n >= perSession) throw new Error('SESSION_GENERATION_LIMIT');
       if (lifetime !== -1 && db.prepare('SELECT COUNT(*) AS n FROM submissions').get().n >= lifetime) throw new Error('GENERATION_BUDGET_EXHAUSTED');
-      db.prepare('INSERT INTO submissions VALUES (?,?,?,?,?,?)').run(key, owner, sessionId, requestKey, jobId, new Date().toISOString());
+      if (authorization) {
+        const usage = db.prepare('SELECT COUNT(*) AS tasks,COALESCE(SUM(MAX(credits_reserved,credits_consumed)),0) AS credits FROM submissions WHERE authorization_id=?').get(authorization.id);
+        if (usage.tasks >= authorization.maxTasks || usage.credits + authorization.creditCeiling > authorization.creditBudget) throw new Error('REFLECTION_AUTHORIZATION_BUDGET_EXHAUSTED');
+      }
+      db.prepare('INSERT INTO submissions (idempotency_key,owner_id,session_id,request_key,job_id,created_at,authorization_id,credits_reserved) VALUES (?,?,?,?,?,?,?,?)')
+        .run(key, owner, sessionId, requestKey, jobId, new Date().toISOString(), authorization?.id ?? '', authorization?.creditCeiling ?? 0);
       db.exec('COMMIT'); return jobId;
     } catch (e) { db.exec('ROLLBACK'); throw e; }
   }
@@ -123,6 +152,7 @@ export async function openLibrary({ dataDir, maxStorageBytes = 512 * 1024 * 1024
     publish: (id, owner) => { const row = rowFor(id); if (!row || row.owner_id !== owner) throw new Error('CREATION_NOT_FOUND'); db.prepare("UPDATE creations SET visibility='shared',reuse_permission='approved_shared_collection' WHERE id=?").run(id); return view(rowFor(id), owner); },
     retire: (id, owner) => { const row = rowFor(id); if (!row || row.owner_id !== owner) throw new Error('CREATION_NOT_FOUND'); db.prepare('UPDATE creations SET retired=1 WHERE id=?').run(id); },
     submissionCount: () => db.prepare('SELECT COUNT(*) AS n FROM submissions').get().n,
+    recordCredits: (jobId, value) => { if (Number.isSafeInteger(value) && value >= 0) db.prepare('UPDATE submissions SET credits_consumed=? WHERE job_id=?').run(value, jobId); },
     priorSubmission: (owner, sessionId, key, requestKey) => db.prepare('SELECT job_id FROM submissions WHERE owner_id=? AND (idempotency_key=? OR (session_id=? AND request_key=?)) ORDER BY created_at LIMIT 1').get(owner, key, sessionId, requestKey)?.job_id,
     close: () => db.close()
   };

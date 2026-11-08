@@ -6,6 +6,8 @@ import { createConversation, safeText } from './conversation.js';
 import { MAX_BYTES, validateGlb } from './glb.js';
 import { requestKey, requirements } from './matching.js';
 import { imageSize } from 'image-size';
+import { reflectionAuthorization } from './reflection-authorization.js';
+import { prepareAnimal } from './animal-request.js';
 
 export async function mountCreations(app, { api, balance, downloadBytes, limitedBody, SafeError, dataDir, enabled, fetchFn,
   pollMs, taskTimeoutMs, openaiKey, openaiModel, offlineConversation = true, reviewMode = 'openai', demoModelPath, demoDelayMs = 2500, maxJobs = 32, library, limits, owner }) {
@@ -61,6 +63,7 @@ export async function mountCreations(app, { api, balance, downloadBytes, limited
           if (task.task_id !== job.task_id) throw new SafeError('INVALID_TASK');
           if (['failed', 'cancelled', 'banned', 'expired'].includes(task.status)) throw new SafeError('GENERATION_FAILED');
           if (task.status === 'success') {
+            library.recordCredits(job.id, task.credits_consumed);
             job.status = 'downloading'; await save(job);
             const { bytes, metadata } = await downloadBytes(task.output?.model_url, signal);
             signal.throwIfAborted(); await library.ensureSpace(bytes.length + 8192); await writeFile(file(job.id, '.glb.tmp'), bytes); await rename(file(job.id, '.glb.tmp'), file(job.id, '.glb')); job.metadata = metadata;
@@ -160,6 +163,23 @@ export async function mountCreations(app, { api, balance, downloadBytes, limited
   });
   let submitting = false;
   const cancelledProposals = new Set();
+  const animalProposals = new Map();
+  app.post('/api/animals/prepare', (req, res) => {
+    const animal = prepareAnimal(req.body?.animal);
+    if (!animal) throw new SafeError('INVALID_ANIMAL', 400);
+    const match = library.search(animal.description, owner)[0];
+    if (match) return res.json({ modelEndpoint: match.modelEndpoint, prebuilt: match.source === 'prebuilt' });
+    for (const [id, proposal] of animalProposals) if (proposal.expires <= Date.now()) animalProposals.delete(id);
+    if (animalProposals.size >= 32) throw new SafeError('CREATION_CAPACITY_REACHED', 409);
+    const id = randomUUID();
+    animalProposals.set(id, { originalRequest: animal.description, prompt: animal.prompt, displayName: animal.displayName,
+      reflection_plan: id, expires: Date.now() + 15 * 60000 });
+    res.json({ proposal_id: id });
+  });
+  app.get('/api/animals/prepare', (req, res) => {
+    res.json({ pending: [...animalProposals].filter(([, proposal]) => proposal.expires > Date.now())
+      .map(([id, proposal]) => ({ proposal_id: id, animal: proposal.originalRequest })) });
+  });
   app.post('/api/creations', async (req, res) => {
     const proposalId = req.body?.proposal_id;
     const existing = [...jobs.values()].find(j => j.proposal_id === proposalId);
@@ -167,7 +187,9 @@ export async function mountCreations(app, { api, balance, downloadBytes, limited
     if (!idPattern.test(proposalId ?? '') || !['live','reuse','demo'].includes(req.body?.mode)) throw new SafeError('INVALID_CREATION_REQUEST', 400);
     if (req.body?.session_id !== undefined && !library.validSession(req.body.session_id, owner)) throw new SafeError('INVALID_SESSION', 400);
     if (req.body?.idempotency_key !== undefined && (typeof req.body.idempotency_key !== 'string' || !/^[a-zA-Z0-9_-]{8,128}$/.test(req.body.idempotency_key))) throw new SafeError('INVALID_IDEMPOTENCY_KEY', 400);
-    const proposal = conversation.proposal(proposalId); if (!proposal) throw new SafeError('PROPOSAL_EXPIRED', 409);
+    const animalProposal = animalProposals.get(proposalId);
+    const proposal = conversation.proposal(proposalId) ?? (animalProposal?.expires > Date.now() ? animalProposal : null);
+    if (!proposal) throw new SafeError('PROPOSAL_EXPIRED', 409);
     if (cancelledProposals.has(proposalId)) throw new SafeError('PROPOSAL_CANCELLED', 409);
     const match = library.search(proposal.originalRequest, owner)[0];
     if (match && req.body?.mode !== 'demo') {
@@ -190,11 +212,17 @@ export async function mountCreations(app, { api, balance, downloadBytes, limited
       const prior = library.priorSubmission(owner, req.body?.session_id ?? proposalId, req.body?.idempotency_key ?? proposalId, requestKey(proposal.originalRequest));
       if (prior) { const priorJob = jobs.get(prior); if (!priorJob) throw new SafeError('SUBMISSION_UNKNOWN_DO_NOT_RESUBMIT', 409); return res.json(view(priorJob)); }
     }
-    if (!demo && !enabled) throw new SafeError('GENERATION_DISABLED', 403);
+    let authorization;
+    if (!demo && (proposal.reflection || (animalProposal && !enabled))) {
+      const receipt = animalProposal ? 'animal-authorization.json' : 'reflection-authorization.json';
+      try { authorization = await reflectionAuthorization(path.join(dataDir, receipt), proposal, proposalId, owner); }
+      catch { throw new SafeError(animalProposal ? 'GENERATION_DISABLED' : 'REFLECTION_TASK_AND_CREDIT_AUTHORIZATION_REQUIRED', 403); }
+    }
+    if (!demo && !enabled && !authorization) throw new SafeError('GENERATION_DISABLED', 403);
     if (submitting || workers.size >= limits.maxConcurrent || [...jobs.values()].filter(j => j.source !== 'library').length >= maxJobs) throw new SafeError('CREATION_CAPACITY_REACHED', 409);
     submitting = true;
     try {
-      if (!demo && (await balance()).balance <= 0) throw new SafeError('INSUFFICIENT_CREDITS', 402);
+      if (!demo && (await balance()).balance < (authorization?.creditCeiling ?? 1)) throw new SafeError('INSUFFICIENT_CREDITS', 402);
       if (cancelledProposals.has(proposalId)) throw new SafeError('PROPOSAL_CANCELLED', 409);
       await library.ensureSpace(limits.maxModelBytes * 2 + 8 * 1024 * 1024 + 16384);
       const prompt = limits.authorizedPrompt ?? proposal.prompt;
@@ -210,8 +238,8 @@ export async function mountCreations(app, { api, balance, downloadBytes, limited
         const key = req.body?.idempotency_key ?? proposalId;
         if (typeof key !== 'string' || !/^[a-zA-Z0-9_-]{8,128}$/.test(key)) throw new SafeError('INVALID_IDEMPOTENCY_KEY', 400);
         let prior;
-        try { prior = library.reserve({ key, owner, sessionId, requestKey: requestKey(proposal.originalRequest), jobId: job.id, perSession: limits.perSession, lifetime: limits.maxLifetime }); }
-        catch (e) { job.status = 'failed'; job.error = ['SESSION_GENERATION_LIMIT','GENERATION_BUDGET_EXHAUSTED','IDEMPOTENCY_CONFLICT'].includes(e.message) ? e.message : 'STORAGE_FAILED'; await save(job); throw new SafeError(job.error, 409); }
+        try { prior = library.reserve({ key, owner, sessionId, requestKey: requestKey(proposal.originalRequest), jobId: job.id, perSession: limits.perSession, lifetime: limits.maxLifetime, authorization }); }
+        catch (e) { job.status = 'failed'; job.error = ['SESSION_GENERATION_LIMIT','GENERATION_BUDGET_EXHAUSTED','IDEMPOTENCY_CONFLICT','REFLECTION_AUTHORIZATION_BUDGET_EXHAUSTED'].includes(e.message) ? e.message : 'STORAGE_FAILED'; await save(job); throw new SafeError(job.error, 409); }
         if (prior !== job.id) { job.status = 'cancelled'; await save(job); const priorJob = jobs.get(prior); if (!priorJob) throw new SafeError('SUBMISSION_UNKNOWN_DO_NOT_RESUBMIT', 409); return res.json(view(priorJob)); }
         try {
           const task = await api('/generation/text-to-model', { prompt, model: 'P1-20260311', face_limit: 5000, texture: true, pbr: true });

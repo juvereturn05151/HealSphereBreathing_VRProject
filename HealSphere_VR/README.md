@@ -1,16 +1,12 @@
-# HealSphere — Dream Creation and A Little Moment to Breathe
+# HealSphere — Create an Animal
 
-**Current local configuration:** paid generation is enabled and the owner has removed lifetime and per-session count quotas (`-1` means unlimited). Each new paid task still requires confirmation. Visual and manual approval are disabled (`MODEL_REVIEW_MODE=none`); validated downloads proceed directly to the existing breathing/reveal flow. Prompt checks and technical model limits remain. Existing paid history is preserved; configuration changes submitted no task. Restart Play Mode before submitting a fresh request. Saved matches still reuse existing models automatically. Earlier validation reports record the restricted settings used during testing.
+Open `Assets/HealSphere/Creation/Scenes/HealSphereCreation.unity` in Unity **6000.4.6f1** and press Play. Pick a preset or type a single animal description such as **A little sleeping fox**. Select **Create and Breathe**. The Dream Seed and meadow respond to a guided four-second inhale and six-second exhale while the model loads. After a cycle, glowing motes gather on the actual mesh and reveal the animal. **Create Another** returns to the picker. **Relax Here** hides the panel and leaves the animal in place.
 
-The launch scene is **HealSphereCreation**: ask the rabbit for an object, breathe with gentle guidance, and watch it form from mesh-surface motes. The real sleeping fox is now saved in a persistent backend Creation Library. Matching requests reuse it automatically through glTFast and the existing reveal flow. The default **Prebuilt demo cat** still works entirely offline. Voice input is not implemented.
+For connected play, start the backend with `npm start` from the Backend folder and configure the device-local connection. The picker reuses matching saved models automatically. New paid generation requires a separate authorization that names the request, sets a task limit and reserves a verified credit ceiling. The local catalogue covers Cat, Dog, Fox, Rabbit, Deer, Owl, Elephant and Gorilla. A fallback is labeled in the scene.
 
-**The one authorized Tripo generation succeeded, used 40 credits, and must not be repeated. Paid generation remains disabled.** See [current library setup and verification](Documentation/CreationLibrary.md) and [live milestone results](Documentation/CreationLibraryValidation.md). Configure the device-local backend connection to use the saved fox; no new UI or Inspector references are needed.
+[Animal creation setup, authorization, verification and Quest installation](Documentation/CreateAnAnimal.md)
 
-Open `Assets/HealSphere/Creation/Scenes/HealSphereCreation.unity`, press Play, choose **Create a dream**, select the request field, type using the spatial keyboard (or desktop keyboard), then **Ask rabbit → Form demo cat**. Three 4-second inhale / 6-second exhale cycles charge the seed; three more guide the formation. Rest or pause at any point. These are timed participation events, not measured breathing. **Create another** begins a fresh request while retaining up to three completed models. **Just breathe** opens the preserved, automatically starting two-minute wellness scene.
-
-See [Creation setup, Inspector references, live backend, testing and Quest installation](Assets/HealSphere/Creation/README.md). The remaining sections describe the preserved wellness-only experience. No API key, object selection, score or breath measurement is required in that mode.
-
-The creation APK output is `Builds/HealSphereCreation/HealSphereCreation.apk`. See the current library validation report for its build status. The [earlier validation report](Documentation/HealSphereCreationValidation.md) records the previous offline/mocked milestone; its statements about untested real providers are superseded by the current report.
+The separate **HealSphereMoment** scene remains available for the automatic two-minute wellness session. The earlier private reflection and voice workflow is documented in [Animal Reflection](Documentation/AnimalReflection.md).
 
 ## Open and play
 

@@ -39,9 +39,17 @@ namespace HealSphere.Creation
         public CreationSessionState State { get; private set; }
         public bool IsPaused { get; private set; }
         public int CompletedCount { get; private set; }
+        internal string Failure => failure;
         public int ChargedCycles => cycles;
         public bool UsesLiveBackend => live;
         public GameObject CurrentModel => candidate;
+        public GameObject LatestAnimal => completed.Count == 0 ? null : completed[completed.Count - 1];
+        internal GameObject ShowFriend(int index)
+        {
+            for (int i = 0; i < completed.Count; i++) completed[i].SetActive(i == index);
+            return index >= 0 && index < completed.Count ? completed[index] : null;
+        }
+        internal void PlayAwakeningChime() => audioController.PlayCreationChime();
         public bool IsConfigured => presentation != null && presentation.IsConfigured && loader != null && breathing != null && seed != null && reveal != null && reveal.IsConfigured &&
             environmentReaction != null && environmentReaction.IsConfigured && companion != null && companion.IsConfigured && audioController != null && audioController.IsConfigured && configuration != null &&
             completedAnchors != null && completedAnchors.Length == 3 && completedAnchors[0] != null && completedAnchors[1] != null && completedAnchors[2] != null;
@@ -54,6 +62,32 @@ namespace HealSphere.Creation
         private string activeProposalId = "", backendSessionId = "";
         private bool live, backendJob, modelReady, settling, menuHeld, restartHeld;
         private bool liveGenerationAvailable = true;
+        private bool externalControl;
+        private sealed class PreparedModel
+        {
+            internal string Endpoint, Animal, Role;
+            internal bool Local, Prebuilt;
+            internal Func<CancellationToken, Task<(byte[] Bytes, bool Prebuilt)>> Load;
+        }
+        private bool singleAnimal;
+        private float animalRevealTime;
+        public void BeginAnimalCreation(string name, Func<CancellationToken, Task<(byte[] Bytes, bool Prebuilt)>> load)
+        {
+            proposal = Proposal.Prepared(name);
+            BeginCreation(false, false, new PreparedModel { Load = load });
+        }
+        public void SetExternalControl(bool value) => externalControl = value;
+        public void BeginPreparedCreation(string endpoint, string animal, string role, string displayName, bool local, bool prebuilt)
+        {
+            proposal = Proposal.Prepared(displayName);
+            BeginCreation(local, false, new PreparedModel { Endpoint = endpoint, Animal = animal, Role = role, Local = local, Prebuilt = prebuilt });
+        }
+        public void ResetPreparedCreations()
+        {
+            CancelWork(); foreach (var item in completed) if (item != null) Destroy(item);
+            completed.Clear(); CompletedCount = 0;
+        }
+        public void EnterWellness() => Wellness();
         private float elapsed, breathAmount;
         [Serializable] private sealed class IdeaRequest { [SerializeField] private string idea; [SerializeField] private string clarification_id; public IdeaRequest(string text, string id) { idea = text; clarification_id = id; } }
         [Serializable] private sealed class BackendSession { [SerializeField] private string session_id; public string Id => session_id; }
@@ -72,6 +106,7 @@ namespace HealSphere.Creation
             public bool Accepted => accepted; public bool Clarify => needsClarification; public string Response => response; public string Question => question;
             public string Name => displayName; public string Prompt => prompt; public string Source => source; public string Id => proposal_id; public string Clarification => clarification_id;
             public bool HasSavedCreation => !string.IsNullOrEmpty(saved_creation_id);
+            public static Proposal Prepared(string name) => new Proposal { accepted = true, displayName = name };
             public static Proposal Offline(string text)
             {
                 text = (text ?? "").Trim();
@@ -90,7 +125,7 @@ namespace HealSphere.Creation
         {
             loader?.ReloadLocalConnection(); live = useBackendWhenConfigured && loader != null && loader.HasBackendConnection && loader.LiveConnectionRequested;
             if (!IsConfigured) { Debug.LogError("HealSphere creation: assign the authored input/keyboard/buttons and existing systems. No UI fallback is created.", this); return; }
-            presentation.PrimaryRequested += Primary; presentation.SecondaryRequested += Secondary; presentation.WellnessRequested += Wellness;
+            if (!externalControl) { presentation.PrimaryRequested += Primary; presentation.SecondaryRequested += Secondary; presentation.WellnessRequested += Wellness; }
             breathing.Signal += OnBreath; breathing.ExhaleCompleted += OnCycle; reveal.Revealed += OnRevealed;
             audioController.SetMasterVolume(configuration.MasterVolume); audioController.StartAmbience(); seed.Hide(); SetState(CreationSessionState.Welcome);
         }
@@ -150,15 +185,35 @@ namespace HealSphere.Creation
             BeginCreation(!live || !liveGenerationAvailable);
         }
         public void UseOfflineFallback() { BeginCreation(true); }
-        private void BeginCreation(bool local, bool reuse = false)
+        private void BeginCreation(bool local, bool reuse = false, PreparedModel prepared = null)
         {
             CancelWork(); cycles = formedCycles = 0; elapsed = breathAmount = 0; modelReady = settling = false; failure = "";
-            backendJob = !local; activeProposalId = local ? "" : proposal?.Id ?? "";
+            singleAnimal = prepared?.Load != null;
+            var viewer = presentation.Viewer;
+            Pose? viewerAtStart = singleAnimal && viewer != null ? new Pose(viewer.position, viewer.rotation) : null;
+            animalRevealTime = 0;
+            backendJob = !local && prepared == null; activeProposalId = local ? "" : proposal?.Id ?? "";
             environmentReaction.ResetReaction(); companion.RestartMotion(); seed.Show(); breathing.ConfigureTiming(4, 6); breathing.Begin();
             SetState(CreationSessionState.GeneratingModel);
             StartOperation(async token => {
                 byte[] glb; bool reviewedPrebuilt = local;
-                if (local)
+                if (prepared != null)
+                {
+                    reviewedPrebuilt = prepared.Prebuilt;
+                    SetState(CreationSessionState.BreathingAndCharging);
+                    if (prepared.Load != null)
+                    {
+                        var result = await prepared.Load(token);
+                        glb = result.Bytes;
+                        reviewedPrebuilt = result.Prebuilt;
+                    }
+                    else
+                    {
+                        glb = prepared.Local ? await loader.ReadReflectionDemoAsync(prepared.Animal, prepared.Role, token) :
+                            await loader.SendReflectionRequestAsync(prepared.Endpoint, null, token);
+                    }
+                }
+                else if (local)
                 {
                     status = "Offline demo: the Prebuilt demo cat is loading. Your request is not being sent for generation.";
                     SetState(CreationSessionState.BreathingAndCharging, false);
@@ -185,7 +240,7 @@ namespace HealSphere.Creation
                     glb = await loader.SendCreationRequestAsync("/api/creations/" + jobId + "/model", null, token);
                 }
                 token.ThrowIfCancellationRequested();
-                var imported = await loader.LoadCreationAsync(glb, local ? "Prebuilt demo cat — Offline Demo" : "Created " + proposal.Name, reviewedPrebuilt, token);
+                var imported = await loader.LoadCreationAsync(glb, prepared != null ? proposal.Name : local ? "Prebuilt demo cat — Offline Demo" : "Created " + proposal.Name, reviewedPrebuilt, token, singleAnimal, viewerAtStart);
                 if (token.IsCancellationRequested) { Destroy(imported); token.ThrowIfCancellationRequested(); }
                 candidate = imported; modelReady = true; status = local ? "Prebuilt demo cat ready — offline demonstration." : "Your little dream is ready.";
                 SetState(CreationSessionState.ModelReady, false); TryReveal();
@@ -216,14 +271,17 @@ namespace HealSphere.Creation
         {
             if (IsPaused || !IsCreating || settling) return;
             cycles++;
-            if (State == CreationSessionState.RevealingCreation) reveal.SetProgress((float)++formedCycles / revealCycles);
+            if (State == CreationSessionState.RevealingCreation)
+            {
+                if (!singleAnimal) reveal.SetProgress((float)++formedCycles / revealCycles);
+            }
             else TryReveal();
             Render();
         }
         private bool IsCreating => State == CreationSessionState.GeneratingModel || State == CreationSessionState.BreathingAndCharging || State == CreationSessionState.ModelReady || State == CreationSessionState.RevealingCreation;
         private void TryReveal()
         {
-            if (!modelReady || IsPaused || cycles < chargeCycles || candidate == null || State == CreationSessionState.RevealingCreation) return;
+            if (!modelReady || IsPaused || cycles < (singleAnimal ? 1 : chargeCycles) || candidate == null || State == CreationSessionState.RevealingCreation) return;
             foreach (var renderer in candidate.GetComponentsInChildren<Renderer>(true)) renderer.enabled = false;
             candidate.SetActive(true);
             if (!reveal.Prepare(candidate)) { Fail("The model cannot be revealed safely. You can use the offline creation."); return; }
@@ -233,7 +291,23 @@ namespace HealSphere.Creation
         private void OnRevealed()
         {
             if (settling || candidate == null || State != CreationSessionState.RevealingCreation) return;
-            settling = true; breathing.Stop(); seed.Hide(); audioController.PlayCreationChime();
+            settling = true; breathing.Stop(); seed.Hide();
+            if (singleAnimal)
+            {
+                if (completed.Count >= completedAnchors.Length)
+                {
+                    Destroy(completed[0]);
+                    completed.RemoveAt(0);
+                }
+                completed.Add(candidate);
+                candidate = null;
+                CompletedCount = completed.Count;
+                reveal.Cancel();
+                settling = modelReady = false;
+                SetState(CreationSessionState.CreationComplete);
+                return;
+            }
+            audioController.PlayCreationChime();
             var model = candidate; var anchor = completedAnchors[CompletedCount % completedAnchors.Length];
             if (completed.Count >= completedAnchors.Length) { Destroy(completed[0]); completed.RemoveAt(0); }
             StartOperation(async token => {
@@ -269,6 +343,7 @@ namespace HealSphere.Creation
         private void SetState(CreationSessionState value, bool clear = true) { State = value; if (clear) status = ""; Render(); }
         private void Render()
         {
+            if (externalControl) return;
             if (presentation == null || !presentation.IsConfigured) return;
             string mode = live ? (proposal != null && proposal.Source == "offline" ? "Backend • deterministic companion (OpenAI unavailable)" : "Backend mode • paid generation only after confirmation") : "OFFLINE DEMO • deterministic companion • Prebuilt demo cat";
             string body, primary = "", secondary = "";
@@ -296,13 +371,23 @@ namespace HealSphere.Creation
         private void Update()
         {
             if (!IsConfigured) return;
-            if (IsCreating && !IsPaused) { elapsed += Time.deltaTime; TryReveal(); }
+            if (externalControl && !IsCreating) return;
+            if (IsCreating && !IsPaused)
+            {
+                elapsed += Time.deltaTime;
+                TryReveal();
+                if (singleAnimal && State == CreationSessionState.RevealingCreation)
+                {
+                    animalRevealTime += Time.deltaTime;
+                    reveal.SetProgress(animalRevealTime / 5f);
+                }
+            }
             float activity = IsCreating ? 1 : .12f;
             environmentReaction.SetReaction(breathAmount, activity); companion.SetReaction(breathAmount, activity); audioController.SetActivityLevel(.94f + breathAmount * .06f);
             var left = InputDevices.GetDeviceAtXRNode(XRNode.LeftHand); bool menu = left.TryGetFeatureValue(UnityEngine.XR.CommonUsages.menuButton, out bool pressed) && pressed;
             if (menu && !menuHeld) TogglePause(); menuHeld = menu;
             var right = InputDevices.GetDeviceAtXRNode(XRNode.RightHand); bool a = right.TryGetFeatureValue(UnityEngine.XR.CommonUsages.primaryButton, out bool button) && button;
-            if (a && !restartHeld && State == CreationSessionState.CreationComplete) NewRequest(); restartHeld = a;
+            if (!externalControl && a && !restartHeld && State == CreationSessionState.CreationComplete) NewRequest(); restartHeld = a;
         }
         private void OnApplicationPause(bool paused) { if (paused && IsCreating && !IsPaused) TogglePause(); }
         private void OnDisable()
